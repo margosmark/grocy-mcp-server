@@ -389,7 +389,7 @@ def grocy_list_quantity_units() -> str:
 @mcp.tool(annotations=ANNOT_READ)
 def grocy_list_shopping_locations() -> str:
     """List all stores/shopping locations."""
-    items = _get("/api/objects/shopping_location")
+    items = _get("/api/objects/shopping_locations")
     if not items:
         return "No stores found."
     lines = []
