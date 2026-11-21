@@ -129,25 +129,52 @@ def grocy_get_stock() -> str:
     return "\n".join(lines)
 
 
+def _volatile_line(item: Any) -> str:
+    if isinstance(item, str):
+        return f"- {item}"
+    prod = item.get("product") or {}
+    name = prod.get("name") or item.get("product_name") or item.get("name") or "?"
+    if "amount_missing" in item:
+        # Grocy 4.x missing entries carry amount_missing instead of amount
+        return f"- **{name}**: {item['amount_missing']} missing"
+    amount = item.get("amount", "?")
+    due = item.get("best_before_date", "")
+    due_str = f" — best before {due}" if due and due != "2999-12-31" else ""
+    return f"- **{name}**: {amount}{due_str}"
+
+
 @mcp.tool(annotations=ANNOT_READ)
 def grocy_get_stock_volatile() -> str:
     """Get products that are due soon, overdue, expired, or currently missing."""
-    items = _get("/api/stock/volatile")
-    if not items:
+    data = _get("/api/stock/volatile")
+    if not data:
         return "No volatile products."
+
+    # Grocy 3.x/4.x returns a dict of buckets (Grocy 4.x: due_products,
+    # overdue_products, expired_products, missing_products; Grocy 3.x used
+    # expiring_products instead of due/overdue). Older versions/mocks returned
+    # a flat list of stock entries.
+    if isinstance(data, dict):
+        due = data["due_products"] if "due_products" in data else data.get("expiring_products", [])
+        buckets = [
+            ("Due Soon", due or []),
+            ("Overdue (best before date passed)", data.get("overdue_products") or []),
+            ("Expired", data.get("expired_products") or []),
+            ("Missing", data.get("missing_products") or []),
+        ]
+        if not any(items for _, items in buckets):
+            return "No products due soon, overdue, expired, or missing."
+        lines: list[str] = []
+        for title, items in buckets:
+            if not items:
+                continue
+            lines += [f"## {title}", ""]
+            lines += [_volatile_line(item) for item in items]
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
     lines = ["## Due Soon / Overdue / Missing", ""]
-    # Volatile can return mixed types — handle gracefully
-    for item in items:
-        if isinstance(item, str):
-            lines.append(f"- {item}")
-            continue
-        if isinstance(item, dict):
-            prod = item.get("product", {})
-            name = prod.get("name", item.get("product_name", "?"))
-            due = item.get("best_before_date", "")
-            missing = item.get("is_missing", False)
-            status = "❌ MISSING" if missing else f"due: {due}"
-            lines.append(f"- **{name}**: {status}")
+    lines += [_volatile_line(item) for item in data]
     return "\n".join(lines)
 
 
@@ -159,9 +186,11 @@ def grocy_get_product_stock(product_id: int) -> str:
         return "Product not found or not in stock."
     prod = r.get("product", {})
     name = prod.get("name", "?")
-    qty = r.get("amount", 0)
-    opened = r.get("amount_opened", 0)
-    due = r.get("best_before_date", "")
+    # Grocy 4.x renamed these response fields (amount → stock_amount,
+    # best_before_date → next_due_date); keep 3.x names as fallback.
+    qty = r.get("stock_amount", r.get("amount", 0))
+    opened = r.get("stock_amount_opened", r.get("amount_opened", 0))
+    due = r.get("next_due_date", r.get("best_before_date", ""))
     loc_map = _location_map()
     loc_id = prod.get("location_id")
     location = loc_map.get(loc_id, str(loc_id)) if loc_id else "?"
@@ -257,16 +286,24 @@ def grocy_get_product(product_id: int) -> str:
 
 @mcp.tool(annotations=ANNOT_WRITE)
 def grocy_create_product(name: str, product_group_id: int = 0, location_id: int = 0, unit_id: int = 0) -> str:
-    """Create a new product. Use grocy_list_product_groups / grocy_list_locations / grocy_list_quantity_units for valid IDs."""
-    data = {"name": name}
+    """Create a new product. Defaults to your first storage location and quantity unit when not given. Use grocy_list_product_groups / grocy_list_locations / grocy_list_quantity_units for valid IDs."""
+    data: dict[str, Any] = {"name": name}
     if product_group_id:
         data["product_group_id"] = product_group_id
-    if location_id:
-        data["location_id"] = location_id
-    if unit_id:
-        data["qu_id_stock"] = unit_id
+    # Grocy requires location_id and both quantity units on every product
+    # (NOT NULL in 4.x); default to the instance's first entries.
+    if not location_id:
+        locations = _get("/api/objects/locations")
+        location_id = locations[0]["id"] if locations else 0
+    data["location_id"] = location_id
+    if not unit_id:
+        units = _get("/api/objects/quantity_units")
+        unit_id = units[0]["id"] if units else 0
+    data["qu_id_purchase"] = unit_id
+    data["qu_id_stock"] = unit_id
     r = _post("/api/objects/products", data)
-    pid = r.get("id", "unknown")
+    # Grocy 4.x returns created_object_id; older versions returned id.
+    pid = r.get("created_object_id") or r.get("id", "unknown")
     return f"Created product: **{name}** (id: {pid})"
 
 
@@ -287,9 +324,17 @@ def grocy_get_shopping_list() -> str:
     items = _get("/api/objects/shopping_list")
     if not items:
         return "Shopping list is empty."
+    # Grocy 4.x shopping list rows only carry product_id — resolve names from
+    # the products list once (older versions embedded product_name directly).
+    name_map: dict = {}
+    if any(item.get("product_id") and not item.get("product_name") for item in items):
+        name_map = {p["id"]: p.get("name", "?") for p in _get("/api/objects/products")}
     lines = ["## Shopping List", ""]
     for item in items:
-        name = item.get("product_name") or item.get("note", "?")
+        name = item.get("product_name") or item.get("note")
+        if not name and item.get("product_id"):
+            name = name_map.get(item["product_id"], f"product #{item['product_id']}")
+        name = name or "?"
         qty = item.get("amount", 1)
         checked = "✅" if item.get("done", 0) == 1 else "⬜"
         sid = item.get("id", "?")
@@ -328,7 +373,7 @@ def grocy_clear_shopping_list() -> str:
 @mcp.tool(annotations=ANNOT_WRITE)
 def grocy_add_missing_to_shopping_list(shopping_list_id: int = 1) -> str:
     """Add products below minimum stock amount to the shopping list."""
-    _post(f"/api/stock/shoppinglist/add-missing-products", {"shopping_list_id": shopping_list_id})
+    _post("/api/stock/shoppinglist/add-missing-products", {"shopping_list_id": shopping_list_id})
     return "Added missing products to shopping list"
 
 
@@ -449,8 +494,12 @@ def grocy_get_system_info() -> str:
     r = _get("/api/system/info")
     lines = ["## Grocy System Info"]
     for k, v in r.items():
-        if v:
-            lines.append(f"- **{k}**: {v}")
+        if not v:
+            continue
+        if isinstance(v, dict) and "Version" in v:
+            # Grocy 4.x nests the version info: {"Version": ..., "ReleaseDate": ...}
+            v = f"v{v['Version']} (released {v.get('ReleaseDate', '?')})"
+        lines.append(f"- **{k}**: {v}")
     return "\n".join(lines)
 
 
