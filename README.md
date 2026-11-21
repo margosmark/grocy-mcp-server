@@ -28,6 +28,21 @@ in the servers above.
 
 ## Install
 
+Requires Python 3.10+.
+
+### pip
+
+```bash
+pip install grocy-mcp-server
+GROCY_URL=https://grocy.example.com GROCY_KEY=your-api-key grocy-mcp-server
+```
+
+### uvx (no install)
+
+```bash
+uvx --from grocy-mcp-server grocy-mcp-server
+```
+
 ### Docker
 
 ```bash
@@ -41,12 +56,12 @@ docker run --rm -i \
 ### From source
 
 ```bash
+git clone https://github.com/margosmark/grocy-mcp-server.git
+cd grocy-mcp-server
 python3 -m venv .venv && . .venv/bin/activate
-pip install -r requirements.txt
-GROCY_URL=https://grocy.example.com GROCY_KEY=your-api-key python server.py
+pip install -e .
+grocy-mcp-server
 ```
-
-Requires Python 3.10+ (uses `dict | None` unions).
 
 ## Configuration
 
@@ -62,12 +77,30 @@ revoke it without disturbing anything else.
 
 **Claude Desktop / Cursor / any MCP client (stdio):**
 
+After `pip install grocy-mcp-server`, point the client at the console script:
+
+```json
+{
+  "mcpServers": {
+    "grocy": {
+      "command": "grocy-mcp-server",
+      "env": {
+        "GROCY_URL": "https://grocy.example.com",
+        "GROCY_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+Running from a checkout instead:
+
 ```json
 {
   "mcpServers": {
     "grocy": {
       "command": "python3",
-      "args": ["/absolute/path/to/grocy-mcp-server/server.py"],
+      "args": ["-m", "grocy_mcp_server"],
       "env": {
         "GROCY_URL": "https://grocy.example.com",
         "GROCY_KEY": "your-api-key"

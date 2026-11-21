@@ -14,14 +14,27 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 # --- Config ---
-GROCY_URL = os.environ["GROCY_URL"].rstrip("/")
-GROCY_KEY = os.environ["GROCY_KEY"]
+# Read lazily so importing the package (tests, tooling, --help) never requires
+# a live instance. main() validates before serving.
+GROCY_URL = os.environ.get("GROCY_URL", "").rstrip("/")
+GROCY_KEY = os.environ.get("GROCY_KEY", "")
 
-HEADERS = {
-    "GROCY-API-KEY": GROCY_KEY,
-    "Accept": "application/json",
-    "Content-Type": "application/json",
-}
+MISSING_CONFIG_MESSAGE = (
+    "GROCY_URL and GROCY_KEY must be set. Point GROCY_URL at your Grocy base URL "
+    "(for example https://grocy.example.com) and GROCY_KEY at an API key from "
+    "Grocy -> Settings -> Manage API keys."
+)
+
+
+def _headers() -> dict:
+    if not GROCY_URL or not GROCY_KEY:
+        raise ToolError(MISSING_CONFIG_MESSAGE)
+    return {
+        "GROCY-API-KEY": GROCY_KEY,
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+    }
+
 
 # Location IDs are instance-specific — never hardcode them in docstrings.
 # Use grocy_list_locations to resolve valid IDs at call time.
@@ -62,7 +75,7 @@ def _request(method: str, path: str, params: dict | None = None, data: dict | No
         r = httpx.request(
             method,
             f"{GROCY_URL}{path}",
-            headers=HEADERS,
+            headers=_headers(),
             params=params,
             json=data,
             timeout=30,
@@ -491,5 +504,17 @@ def grocy_get_system_info() -> str:
 # MAIN
 # ============================================================
 
-if __name__ == "__main__":
+# ============================================================
+# MAIN
+# ============================================================
+
+def main() -> None:
+    """Entry point for the `grocy-mcp-server` console script."""
+    if not GROCY_URL or not GROCY_KEY:
+        raise SystemExit(MISSING_CONFIG_MESSAGE)
     mcp.run(transport="stdio")
+
+
+if __name__ == "__main__":
+    main()
+

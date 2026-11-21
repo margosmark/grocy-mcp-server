@@ -1,0 +1,44 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "grocy-mcp-server"
+version = "1.0.0"
+description = "MCP server for Grocy: stock, products, shopping lists, chores, locations and recipes"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Mark Arslan" }]
+keywords = ["mcp", "model-context-protocol", "grocy", "household", "inventory", "self-hosted"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: End Users/Desktop",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Home Automation",
+  "Typing :: Typed",
+]
+dependencies = [
+  "fastmcp>=4.0.0",
+  "httpx>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/margosmark/grocy-mcp-server"
+Issues = "https://github.com/margosmark/grocy-mcp-server/issues"
+
+[project.scripts]
+grocy-mcp-server = "grocy_mcp_server.server:main"
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["grocy_mcp_server"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

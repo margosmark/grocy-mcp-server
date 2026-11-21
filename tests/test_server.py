@@ -7,7 +7,7 @@ which changed shape in Grocy 4.x and silently broke other servers.
 
 import pytest
 
-import server
+from grocy_mcp_server import server
 
 
 @pytest.fixture

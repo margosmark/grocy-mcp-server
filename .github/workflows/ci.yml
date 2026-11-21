@@ -21,14 +21,39 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
 
-      - name: Install dependencies
+      - name: Install package with dev extras
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
+          pip install -e ".[dev]"
 
       - name: Run tests
         # The tests stub the transport, so no Grocy instance is needed.
         run: pytest tests/ -q
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - name: Check the wheel installs and exposes the console script
+        run: |
+          python -m venv /tmp/verify
+          /tmp/verify/bin/pip install dist/*.whl
+          /tmp/verify/bin/grocy-mcp-server 2>&1 | grep -q "GROCY_URL and GROCY_KEY must be set"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
 
   docker:
     runs-on: ubuntu-latest
@@ -38,9 +63,6 @@ jobs:
       - name: Build image
         run: docker build -t grocy-mcp:ci .
 
-      - name: Smoke test the container starts and registers tools
+      - name: Container starts and reports missing config
         run: |
-          docker run --rm \
-            -e GROCY_URL=https://grocy.invalid \
-            -e GROCY_KEY=dummy \
-            grocy-mcp:ci --help || true
+          docker run --rm grocy-mcp:ci 2>&1 | grep -q "GROCY_URL and GROCY_KEY must be set"
