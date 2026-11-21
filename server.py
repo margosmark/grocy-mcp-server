@@ -129,26 +129,59 @@ def grocy_get_stock() -> str:
     return "\n".join(lines)
 
 
+VOLATILE_CATEGORIES = (
+    ("overdue_products", "Overdue"),
+    ("due_products", "Due soon"),
+    ("expired_products", "Expired"),
+    ("missing_products", "Missing"),
+)
+
+
 @mcp.tool(annotations=ANNOT_READ)
 def grocy_get_stock_volatile() -> str:
     """Get products that are due soon, overdue, expired, or currently missing."""
-    items = _get("/api/stock/volatile")
-    if not items:
+    payload = _get("/api/stock/volatile")
+    if not payload:
         return "No volatile products."
-    lines = ["## Due Soon / Overdue / Missing", ""]
-    # Volatile can return mixed types — handle gracefully
-    for item in items:
-        if isinstance(item, str):
-            lines.append(f"- {item}")
+
+    # Grocy 4.x returns one object keyed by category, each holding a list of
+    # stock entries. Older/other shapes have been seen as a flat list, so both
+    # are handled rather than assuming one.
+    if isinstance(payload, list):
+        buckets = [("Products", payload)]
+    elif isinstance(payload, dict):
+        buckets = [(label, payload.get(key) or []) for key, label in VOLATILE_CATEGORIES]
+    else:
+        return f"Unexpected response from /api/stock/volatile: {type(payload).__name__}"
+
+    lines: list[str] = []
+    total = 0
+    for label, entries in buckets:
+        if not entries:
             continue
-        if isinstance(item, dict):
-            prod = item.get("product", {})
-            name = prod.get("name", item.get("product_name", "?"))
-            due = item.get("best_before_date", "")
-            missing = item.get("is_missing", False)
-            status = "❌ MISSING" if missing else f"due: {due}"
-            lines.append(f"- **{name}**: {status}")
-    return "\n".join(lines)
+        lines.append(f"### {label} ({len(entries)})")
+        for item in entries:
+            if not isinstance(item, dict):
+                lines.append(f"- {item}")
+                total += 1
+                continue
+            prod = item.get("product") or {}
+            name = prod.get("name") or item.get("product_name") or f"product {item.get('product_id', '?')}"
+            amount = item.get("amount", item.get("amount_aggregated"))
+            due = item.get("best_before_date") or ""
+            bits = []
+            if amount is not None:
+                bits.append(f"{amount} in stock")
+            if due and due != "2999-12-31":
+                bits.append(f"best before {due}")
+            suffix = f" ({', '.join(bits)})" if bits else ""
+            lines.append(f"- **{name}**{suffix}")
+            total += 1
+        lines.append("")
+
+    if not total:
+        return "No volatile products."
+    return "## Due Soon / Overdue / Expired / Missing\n\n" + "\n".join(lines).rstrip()
 
 
 @mcp.tool(annotations=ANNOT_READ)
