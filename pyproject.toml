@@ -1,0 +1,45 @@
+[project]
+name = "grocy-mcp-server"
+version = "1.0.0"
+description = "MCP server that connects Claude Desktop, Cursor and other MCP clients to a self-hosted Grocy instance"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Mark Arslan", email = "me@markarslan.ca" }]
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=4.0.0",
+    "httpx>=0.27.0",
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "grocy",
+    "groceries",
+    "inventory",
+    "home-automation",
+    "ai-agents",
+    "claude",
+    "cursor",
+    "self-hosted",
+]
+classifiers = [
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+    "Topic :: Utilities",
+]
+
+[project.urls]
+Homepage = "https://github.com/margosmark/grocy-mcp-server"
+Repository = "https://github.com/margosmark/grocy-mcp-server"
+Issues = "https://github.com/margosmark/grocy-mcp-server/issues"
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
