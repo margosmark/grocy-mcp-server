@@ -269,3 +269,114 @@ def test_every_tool_has_a_description():
     for name, tool in _tools().items():
         assert tool.description, f"{name} has no description"
 
+# --------------------------------------------------------------------------
+# Grocy 4.x field-rename regressions (merged from the release branch)
+# --------------------------------------------------------------------------
+
+def test_product_stock_reads_stock_amount_4x(grocy):
+    """4.x renamed amount -> stock_amount; reading `amount` reported 0 in stock."""
+    grocy["responses"]["/api/stock/products/2"] = {
+        "product": {"name": "Butter", "location_id": 4},
+        "stock_amount": 15,
+        "stock_amount_opened": 2,
+        "next_due_date": "2026-09-22",
+    }
+    grocy["responses"]["/api/objects/locations"] = [{"id": 4, "name": "Freezer"}]
+
+    out = server.grocy_get_product_stock(2)
+
+    assert "15" in out
+    assert "**Butter**" in out
+    assert "Opened: 2" in out
+    assert "2026-09-22" in out
+
+
+def test_product_stock_falls_back_to_3x_field_names(grocy):
+    grocy["responses"]["/api/stock/products/3"] = {
+        "product": {"name": "Milk", "location_id": 2},
+        "amount": 4,
+        "amount_opened": 0,
+        "best_before_date": "2026-10-10",
+    }
+    grocy["responses"]["/api/objects/locations"] = [{"id": 2, "name": "Fridge"}]
+
+    out = server.grocy_get_product_stock(3)
+
+    assert "4 @ Fridge" in out
+    assert "2026-10-10" in out
+
+
+def test_create_product_sends_required_fields(grocy):
+    """location_id and both quantity units are NOT NULL on Grocy 4.x."""
+    grocy["responses"]["/api/objects/locations"] = [{"id": 7, "name": "Pantry"}]
+    grocy["responses"]["/api/objects/quantity_units"] = [{"id": 3, "name": "Piece"}]
+    grocy["responses"]["/api/objects/products"] = {"created_object_id": 42}
+
+    out = server.grocy_create_product("Oats")
+
+    sent = [c for c in grocy["calls"] if c["method"] == "POST"][-1]["data"]
+    assert sent["location_id"] == 7
+    assert sent["qu_id_purchase"] == 3
+    assert sent["qu_id_stock"] == 3
+    assert "42" in out
+
+
+def test_create_product_reads_created_object_id(grocy):
+    grocy["responses"]["/api/objects/locations"] = [{"id": 1, "name": "L"}]
+    grocy["responses"]["/api/objects/quantity_units"] = [{"id": 1, "name": "U"}]
+    grocy["responses"]["/api/objects/products"] = {"created_object_id": 99}
+
+    assert "(id: 99)" in server.grocy_create_product("Rice")
+
+
+def test_shopping_list_resolves_product_names_from_ids(grocy):
+    """4.x rows carry only product_id; the old code rendered 'None'."""
+    grocy["responses"]["/api/objects/shopping_list"] = [
+        {"id": 10, "product_id": 5, "amount": 2, "done": 0}
+    ]
+    grocy["responses"]["/api/objects/products"] = [
+        {"id": 5, "name": "Coffee"},
+        {"id": 6, "name": "Tea"},
+    ]
+
+    out = server.grocy_get_shopping_list()
+
+    assert "Coffee" in out
+    assert "None" not in out
+
+
+def test_shopping_list_falls_back_when_product_missing(grocy):
+    grocy["responses"]["/api/objects/shopping_list"] = [
+        {"id": 11, "product_id": 77, "amount": 1, "done": 0}
+    ]
+    grocy["responses"]["/api/objects/products"] = [{"id": 5, "name": "Coffee"}]
+
+    assert "product #77" in server.grocy_get_shopping_list()
+
+
+def test_system_info_formats_nested_version(grocy):
+    grocy["responses"]["/api/system/info"] = {
+        "grocy_version": {"Version": "4.7.1", "ReleaseDate": "2026-09-04"},
+        "php_version": "8.5.13",
+    }
+
+    out = server.grocy_get_system_info()
+
+    assert "v4.7.1 (released 2026-09-04)" in out
+    assert "8.5.13" in out
+
+
+def test_volatile_missing_entries_use_amount_missing(grocy):
+    grocy["responses"]["/api/stock/volatile"] = {
+        "due_products": [],
+        "overdue_products": [],
+        "expired_products": [],
+        "missing_products": [
+            {"amount_missing": 3, "product_id": 12, "product": {"name": "Eggs"}}
+        ],
+    }
+
+    out = server.grocy_get_stock_volatile()
+
+    assert "3 missing" in out
+    assert "### Missing (1)" in out
