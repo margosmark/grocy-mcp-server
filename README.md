@@ -12,6 +12,10 @@ A [Model Context Protocol](https://modelcontextprotocol.io) server that connects
 
 Every tool carries [MCP tool annotations](https://modelcontextprotocol.io/specification/2025-06-18/server/tools#tool-annotations) (`readOnly` / `write` / `destructive` / `overwrite`) so clients can warn you before anything destructive runs.
 
+## Grocy compatibility
+
+Verified against **Grocy 4.7.1** — both a long-running instance and a fresh container — including every read and write tool. That covers the Grocy 4.x `/api/stock/volatile` response change: 4.x returns `due_products` / `overdue_products` buckets instead of `expiring_products`, the rename that silently breaks other Grocy MCP servers (e.g. [attmous/grocy-mcp#10](https://github.com/attmous/grocy-mcp/issues/10)). This server reads the 4.x keys and falls back to the Grocy 3.x names, and handles the other 4.x field renames (`stock_amount`, `next_due_date`, `created_object_id`, shopping-list rows without an embedded `product_name`).
+
 ## Requirements
 
 - Python **3.10+** (or Docker)
@@ -118,25 +122,41 @@ Restart the client after editing; the `grocy_*` tools appear in the tool picker.
 
 ## Sample session
 
-Captured live from this server (mock Grocy backend, real MCP round-trip):
+Captured live from this server over MCP stdio against a fresh **Grocy 4.7.1** container:
 
 ```text
 # connected — tools/list
 (26 tools) grocy_get_stock, grocy_get_stock_volatile, grocy_get_product_stock, grocy_add_stock, grocy_consume_stock, grocy_transfer_stock, grocy_set_stock, grocy_open_stock, grocy_list_products, grocy_get_product, grocy_create_product, grocy_delete_product, grocy_get_shopping_list, grocy_add_to_shopping_list, grocy_add_note_to_shopping_list, grocy_remove_from_shopping_list, grocy_clear_shopping_list, grocy_add_missing_to_shopping_list, grocy_list_locations, grocy_list_product_groups, grocy_list_quantity_units, grocy_list_shopping_locations, grocy_list_chores, grocy_list_grocy_recipes, grocy_add_recipe_to_shopping_list, grocy_get_system_info
 
+> grocy_get_stock_volatile()
+## Due Soon
+
+- **Whole Milk**: 2 — best before 2026-11-25
+
+## Overdue (best before date passed)
+
+- **Probe Butter**: 9 — best before 2026-01-05
+
 > grocy_get_stock()
 ## Current Stock
 
-- **Milk**: 1.5 @ Fridge (due: 2026-11-24)
-- **Eggs**: 12 @ Fridge
+- **Probe Butter**: 9 @ Fridge [4 opened] (due: 2026-01-05)
+- **Whole Milk**: 2 @ Fridge (due: 2026-11-25)
 
 > grocy_get_system_info()
 ## Grocy System Info
-- **grocy_version**: v4.0.3
-- **php_version**: 8.3
+- **grocy_version**: v4.7.1 (released 2026-09-04)
+- **php_version**: 8.5.13
+- **sqlite_version**: 3.53.4
 
-> grocy_add_to_shopping_list(product_id=7, amount=2)
-Added product 7 (x2) to shopping list
+> grocy_add_to_shopping_list(product_id=6, amount=2)
+Added product 6 (x2) to shopping list
+
+> grocy_get_shopping_list()
+## Shopping List
+
+⬜ 2x Whole Milk (id: 8)
+⬜ 1x sourdough starter (id: 9)
 
 ```
 
@@ -154,7 +174,7 @@ Added product 7 (x2) to shopping list
 | `grocy_open_stock` | Mark stock as opened. | 🟡 write |
 | `grocy_list_products` | List products. Optional search by name. | 🟢 read |
 | `grocy_get_product` | Get full product details by ID. | 🟢 read |
-| `grocy_create_product` | Create a new product. Use grocy_list_product_groups / grocy_list_locations / grocy_list_quantity_units for valid IDs. | 🟡 write |
+| `grocy_create_product` | Create a new product. Defaults to your first storage location and quantity unit when not given. Use grocy_list_product_groups / grocy_list_locations / grocy_list_quantity_units for valid IDs. | 🟡 write |
 | `grocy_delete_product` | Delete a product by ID. This cannot be undone. | 🔴 destructive |
 | `grocy_get_shopping_list` | Get all items on the shopping list. | 🟢 read |
 | `grocy_add_to_shopping_list` | Add a product to the shopping list. | 🟡 write |
@@ -170,6 +190,16 @@ Added product 7 (x2) to shopping list
 | `grocy_list_grocy_recipes` | List recipes stored in Grocy (basic — use the mealie MCP server for full recipe management). | 🟢 read |
 | `grocy_add_recipe_to_shopping_list` | Add missing products from a Grocy recipe to the shopping list. | 🟡 write |
 | `grocy_get_system_info` | Get Grocy system info (version, etc.). | 🟢 read |
+
+## Development
+
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+ruff check .   # lint
+pytest         # tests — Grocy is faked in-process, no network or instance needed
+```
+
+CI (`.github/workflows/ci.yml`) runs the same two commands on every push. The tests pin the Grocy 4.x response shapes (volatile buckets, `stock_amount`, `created_object_id`, shopping-list name resolution) and the Grocy 3.x fallbacks, and fail if the tool list and this README drift apart.
 
 ## License
 
